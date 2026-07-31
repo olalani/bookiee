@@ -6,14 +6,12 @@ WORKDIR /app
 COPY package*.json ./
 COPY prisma ./prisma/
 
-# Delete lockfile to avoid conflicts, install all deps
-RUN rm -f package-lock.json
 RUN npm install
 
 COPY . .
 
 RUN npx prisma generate
-RUN node_modules/.bin/nest build
+RUN npx nest build
 
 # Production stage
 FROM node:20-alpine AS production
