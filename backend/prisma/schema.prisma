@@ -1,0 +1,380 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Core Tenancy & Identity ─────────────────────────────────────
+
+model User {
+  id           String          @id @default(uuid()) @db.Uuid
+  phoneNumber  String          @unique @map("phone_number")
+  fullName     String?         @map("full_name")
+  passwordHash String?         @map("password_hash")
+  createdAt    DateTime        @default(now()) @map("created_at")
+  updatedAt    DateTime        @updatedAt @map("updated_at")
+
+  businessUsers  BusinessUser[]
+  transactions   Transaction[]   @relation("TransactionCreator")
+  auditLogs      TransactionAuditLog[]
+
+  @@map("users")
+}
+
+model Business {
+  id                      String   @id @default(uuid()) @db.Uuid
+  name                    String
+  businessType            String?  @map("business_type")
+  currency                String   @default("NGN")
+  autoConfirmThreshold    Decimal  @default(100000) @map("auto_confirm_threshold") @db.Decimal(14, 2)
+  onboarded               Boolean  @default(false)
+  whatsappPhoneNumberId   String?  @map("whatsapp_phone_number_id")
+  logoUrl                 String?  @map("logo_url")
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @updatedAt @map("updated_at")
+
+  businessUsers     BusinessUser[]
+  whatsappSessions  WhatsappSession[]
+  inboundMessages   InboundMessage[]
+  categories        Category[]
+  transactions      Transaction[]
+  receipts          Receipt[]
+  products          Product[]
+  catalogShares     CatalogShare[]
+  invoices          Invoice[]
+  staff             Staff[]
+  payrollPeriods    PayrollPeriod[]
+  bankAccounts      BankAccount[]
+  deadLetterItems   DeadLetterItem[]
+
+  @@map("businesses")
+}
+
+model BusinessUser {
+  id         String    @id @default(uuid()) @db.Uuid
+  businessId String    @map("business_id") @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  role       String    // owner, accountant, staff
+  scope      Json      @default("{}")
+  invitedAt  DateTime  @default(now()) @map("invited_at")
+  revokedAt  DateTime? @map("revoked_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, userId])
+  @@index([businessId])
+  @@map("business_users")
+}
+
+// ─── WhatsApp Ingestion ──────────────────────────────────────────
+
+model WhatsappSession {
+  id                   String    @id @default(uuid()) @db.Uuid
+  businessId           String    @map("business_id") @db.Uuid
+  phoneNumber          String    @map("phone_number")
+  pendingTransaction   Json?     @map("pending_transaction")
+  lastInteractionAt    DateTime  @default(now()) @map("last_interaction_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, phoneNumber])
+  @@map("whatsapp_sessions")
+}
+
+model InboundMessage {
+  id                 String   @id @default(uuid()) @db.Uuid
+  whatsappMessageId  String   @unique @map("whatsapp_message_id")
+  businessId         String   @map("business_id") @db.Uuid
+  messageType        String   @map("message_type") // voice, text, button_reply
+  rawAudioUrl        String?  @map("raw_audio_url")
+  transcriptText     String?  @map("transcript_text")
+  processingStatus   String   @default("queued") @map("processing_status") // queued, processing, parsed, failed
+  receivedAt         DateTime @default(now()) @map("received_at")
+
+  business   Business       @relation(fields: [businessId], references: [id])
+  transaction Transaction?
+
+  @@index([businessId, receivedAt])
+  @@map("inbound_messages")
+}
+
+// ─── Ledger ──────────────────────────────────────────────────────
+
+model Category {
+  id              String  @id @default(uuid()) @db.Uuid
+  businessId      String  @map("business_id") @db.Uuid
+  name            String
+  isSystemDefault Boolean @default(false) @map("is_system_default")
+
+  business     Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+
+  @@unique([businessId, name])
+  @@map("categories")
+}
+
+model Transaction {
+  id                 String    @id @default(uuid()) @db.Uuid
+  businessId         String    @map("business_id") @db.Uuid
+  sourceType         String    @map("source_type") // voice, text, manual, invoice, receipt, payroll
+  inboundMessageId   String?   @unique @map("inbound_message_id") @db.Uuid
+  direction          String    // in, out
+  amount             Decimal   @db.Decimal(14, 2)
+  counterpartyName   String?   @map("counterparty_name")
+  counterpartyPhone  String?   @map("counterparty_phone")
+  categoryId         String?   @map("category_id") @db.Uuid
+  confidenceScore    Decimal?  @map("confidence_score") @db.Decimal(4, 3)
+  status             String    @default("confirmed") // pending, confirmed, discarded
+  requiresReview     Boolean   @default(false) @map("requires_review")
+  createdBy          String?   @map("created_by") @db.Uuid
+  transactionDate    DateTime  @default(now()) @map("transaction_date")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  business       Business              @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  inboundMessage InboundMessage?       @relation(fields: [inboundMessageId], references: [id])
+  category       Category?             @relation(fields: [categoryId], references: [id])
+  creator        User?                 @relation("TransactionCreator", fields: [createdBy], references: [id])
+  receipts       Receipt[]
+  auditLogs      TransactionAuditLog[]
+  invoice        Invoice?
+  payrollEntry   PayrollEntry?
+  matchedBankTxn BankTransactionRaw?
+
+  @@index([businessId, transactionDate])
+  @@index([businessId, status])
+  @@map("transactions")
+}
+
+model TransactionAuditLog {
+  id            String   @id @default(uuid()) @db.Uuid
+  transactionId String   @map("transaction_id") @db.Uuid
+  changedBy     String?  @map("changed_by") @db.Uuid
+  changeType    String   @map("change_type") // created, edited, discarded, confirmed
+  diff          Json?
+  changedAt     DateTime @default(now()) @map("changed_at")
+
+  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  user        User?       @relation(fields: [changedBy], references: [id])
+
+  @@map("transaction_audit_log")
+}
+
+// ─── Receipts ────────────────────────────────────────────────────
+
+model Receipt {
+  id              String    @id @default(uuid()) @db.Uuid
+  transactionId   String    @map("transaction_id") @db.Uuid
+  businessId      String    @map("business_id") @db.Uuid
+  pdfUrl          String    @map("pdf_url")
+  referenceNumber String    @unique @map("reference_number")
+  sentToPhone     String?   @map("sent_to_phone")
+  sentAt          DateTime? @map("sent_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  business    Business    @relation(fields: [businessId], references: [id])
+
+  @@map("receipts")
+}
+
+// ─── Inventory ───────────────────────────────────────────────────
+
+model Product {
+  id         String   @id @default(uuid()) @db.Uuid
+  businessId String   @map("business_id") @db.Uuid
+  name       String
+  price      Decimal  @db.Decimal(14, 2)
+  stockQty   Int      @default(0) @map("stock_qty")
+  imageUrl   String?  @map("image_url")
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@map("products")
+}
+
+model CatalogShare {
+  id          String    @id @default(uuid()) @db.Uuid
+  businessId  String    @map("business_id") @db.Uuid
+  shareToken  String    @unique @map("share_token")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  expiresAt   DateTime? @map("expires_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@map("catalog_shares")
+}
+
+// ─── Invoicing ───────────────────────────────────────────────────
+
+model Invoice {
+  id               String   @id @default(uuid()) @db.Uuid
+  businessId       String   @map("business_id") @db.Uuid
+  clientName       String   @map("client_name")
+  clientContact    String   @map("client_contact")
+  status           String   @default("draft") // draft, sent, viewed, partially_paid, paid, overdue
+  totalAmount      Decimal  @map("total_amount") @db.Decimal(14, 2)
+  amountPaid       Decimal  @default(0) @map("amount_paid") @db.Decimal(14, 2)
+  dueDate          DateTime? @map("due_date") @db.Date()
+  paymentLink      String?  @map("payment_link")
+  paymentProvider  String?  @map("payment_provider")
+  followUpCount    Int      @default(0) @map("follow_up_count")
+  transactionId    String?  @unique @map("transaction_id") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  business   Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  transaction Transaction?   @relation(fields: [transactionId], references: [id])
+  lineItems  InvoiceLineItem[]
+  events     InvoiceEvent[]
+  webhookEvents PaymentWebhookEvent[]
+
+  @@index([businessId, status])
+  @@map("invoices")
+}
+
+model InvoiceLineItem {
+  id          String  @id @default(uuid()) @db.Uuid
+  invoiceId   String  @map("invoice_id") @db.Uuid
+  description String
+  quantity    Decimal @default(1) @db.Decimal(10, 2)
+  unitPrice   Decimal @map("unit_price") @db.Decimal(14, 2)
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@map("invoice_line_items")
+}
+
+model InvoiceEvent {
+  id        String   @id @default(uuid()) @db.Uuid
+  invoiceId String   @map("invoice_id") @db.Uuid
+  eventType String   @map("event_type") // sent, viewed, reminder_sent, paid, partially_paid
+  eventAt   DateTime @default(now()) @map("event_at")
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@map("invoice_events")
+}
+
+model PaymentWebhookEvent {
+  id                 String   @id @default(uuid()) @db.Uuid
+  provider           String
+  providerReference  String   @map("provider_reference")
+  invoiceId          String?  @map("invoice_id") @db.Uuid
+  rawPayload         Json     @map("raw_payload")
+  processed          Boolean  @default(false)
+  receivedAt         DateTime @default(now()) @map("received_at")
+
+  invoice Invoice? @relation(fields: [invoiceId], references: [id])
+
+  @@unique([provider, providerReference])
+  @@map("payment_webhook_events")
+}
+
+// ─── Payroll ─────────────────────────────────────────────────────
+
+model Staff {
+  id           String   @id @default(uuid()) @db.Uuid
+  businessId   String   @map("business_id") @db.Uuid
+  fullName     String   @map("full_name")
+  salaryAmount Decimal  @map("salary_amount") @db.Decimal(14, 2)
+  pensionRate  Decimal? @map("pension_rate") @db.Decimal(5, 2) // percentage
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  business      Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  payrollEntries PayrollEntry[]
+
+  @@map("staff")
+}
+
+model PayrollPeriod {
+  id          String   @id @default(uuid()) @db.Uuid
+  businessId  String   @map("business_id") @db.Uuid
+  periodStart DateTime @db.Date() @map("period_start")
+  periodEnd   DateTime @db.Date() @map("period_end")
+  status      String   @default("draft") // draft, paid
+
+  business   Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  entries    PayrollEntry[]
+
+  @@unique([businessId, periodStart, periodEnd])
+  @@map("payroll_periods")
+}
+
+model PayrollEntry {
+  id              String   @id @default(uuid()) @db.Uuid
+  payrollPeriodId String   @map("payroll_period_id") @db.Uuid
+  staffId         String   @map("staff_id") @db.Uuid
+  salarySnapshot  Decimal  @map("salary_snapshot") @db.Decimal(14, 2)
+  payeTax         Decimal  @default(0) @map("paye_tax") @db.Decimal(14, 2)
+  pensionContribution Decimal @default(0) @map("pension_contribution") @db.Decimal(14, 2)
+  netPay          Decimal  @map("net_pay") @db.Decimal(14, 2)
+  payslipUrl      String?  @map("payslip_url")
+  transactionId   String?  @unique @map("transaction_id") @db.Uuid
+
+  payrollPeriod PayrollPeriod @relation(fields: [payrollPeriodId], references: [id], onDelete: Cascade)
+  staff         Staff         @relation(fields: [staffId], references: [id])
+  transaction   Transaction?  @relation(fields: [transactionId], references: [id])
+
+  @@map("payroll_entries")
+}
+
+// ─── Bank Sync (Mock) ───────────────────────────────────────────
+
+model BankAccount {
+  id              String   @id @default(uuid()) @db.Uuid
+  businessId      String   @map("business_id") @db.Uuid
+  monoAccountId   String   @unique @map("mono_account_id")
+  accountName     String?  @map("account_name")
+  bankName        String?  @map("bank_name")
+  linkedAt        DateTime @default(now()) @map("linked_at")
+
+  business       Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  bankTransactions BankTransactionRaw[]
+
+  @@map("bank_accounts")
+}
+
+model BankTransactionRaw {
+  id                   String    @id @default(uuid()) @db.Uuid
+  bankAccountId        String    @map("bank_account_id") @db.Uuid
+  monoTransactionId    String    @unique @map("mono_transaction_id")
+  amount               Decimal   @db.Decimal(14, 2)
+  narration            String?
+  txnDate              DateTime  @db.Date() @map("txn_date")
+  matchedTransactionId String?   @unique @map("matched_transaction_id") @db.Uuid
+  receivedAt           DateTime  @default(now()) @map("received_at")
+
+  bankAccount       BankAccount   @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+  matchedTransaction Transaction? @relation(fields: [matchedTransactionId], references: [id])
+
+  @@map("bank_transactions_raw")
+}
+
+// ─── Dead Letter Queue ───────────────────────────────────────────
+
+model DeadLetterItem {
+  id               String   @id @default(uuid()) @db.Uuid
+  businessId       String   @map("business_id") @db.Uuid
+  inboundMessageId String?  @map("inbound_message_id") @db.Uuid
+  rawPayload       Json     @map("raw_payload")
+  errorReason      String   @map("error_reason")
+  status           String   @default("pending") // pending, reviewed, resolved, dismissed
+  reviewedBy       String?  @map("reviewed_by") @db.Uuid
+  resolvedAt       DateTime? @map("resolved_at")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, status])
+  @@map("dead_letter_items")
+}
