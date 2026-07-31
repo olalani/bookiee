@@ -6,7 +6,7 @@ WORKDIR /app
 COPY package*.json ./
 COPY prisma ./prisma/
 
-RUN npm ci --only=production
+RUN npm ci
 
 COPY . .
 
@@ -23,7 +23,7 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/prisma ./prisma
 
-RUN npm ci --only=production && npm cache clean --force
+RUN npm prune --production && npm cache clean --force
 
 EXPOSE 3001
 
