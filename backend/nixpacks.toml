@@ -1,0 +1,6 @@
+# nixpacks.toml
+[phases.install]
+cmds = ["npm install --include=dev"]
+
+[phases.build]
+cmds = ["npx prisma generate", "npx nest build"]

@@ -1,8 +1,9 @@
 {
   "$schema": "https://railway.com/railway.schema.json",
   "build": {
-    "builder": "DOCKERFILE",
-    "dockerfilePath": "Dockerfile"
+    "builder": "NIXPACKS",
+    "buildCommand": "npm install --include=dev && npx prisma generate && npx nest build",
+    "watchPatterns": ["src/**"]
   },
   "deploy": {
     "startCommand": "node dist/main",
