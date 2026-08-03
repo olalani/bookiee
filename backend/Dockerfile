@@ -1,6 +1,8 @@
 # Build stage
 FROM node:20-slim AS builder
 
+RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 COPY package*.json ./
@@ -8,13 +10,16 @@ COPY prisma ./prisma/
 
 RUN npm install
 
+RUN npx prisma generate
+
 COPY . .
 
-RUN npx prisma generate
 RUN npx nest build
 
 # Production stage
 FROM node:20-slim AS production
+
+RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
