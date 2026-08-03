@@ -11,6 +11,7 @@ export default function PayrollPage() {
   const [showGenerate, setShowGenerate] = useState(false);
   const [staffForm, setStaffForm] = useState({ fullName: '', salaryAmount: 0, pensionRate: 8 });
   const [periodForm, setPeriodForm] = useState({ periodStart: '', periodEnd: '' });
+  const [formError, setFormError] = useState('');
 
   useEffect(() => {
     Promise.all([api.getStaff(), api.getPayrollPeriods()])
@@ -20,18 +21,28 @@ export default function PayrollPage() {
 
   const handleAddStaff = async (e: React.FormEvent) => {
     e.preventDefault();
-    await api.addStaff(staffForm);
-    setShowAddStaff(false);
-    setStaffForm({ fullName: '', salaryAmount: 0, pensionRate: 8 });
-    api.getStaff().then(setStaffList);
+    setFormError('');
+    try {
+      await api.addStaff(staffForm);
+      setShowAddStaff(false);
+      setStaffForm({ fullName: '', salaryAmount: 0, pensionRate: 8 });
+      api.getStaff().then(setStaffList);
+    } catch (err: any) {
+      setFormError(err.message || 'Failed to add staff');
+    }
   };
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
-    await api.generatePayroll(periodForm);
-    setShowGenerate(false);
-    setPeriodForm({ periodStart: '', periodEnd: '' });
-    api.getPayrollPeriods().then(setPeriods);
+    setFormError('');
+    try {
+      await api.generatePayroll(periodForm);
+      setShowGenerate(false);
+      setPeriodForm({ periodStart: '', periodEnd: '' });
+      api.getPayrollPeriods().then(setPeriods);
+    } catch (err: any) {
+      setFormError(err.message || 'Failed to generate payroll');
+    }
   };
 
   const handleMarkPaid = async (periodId: string) => {
@@ -60,6 +71,9 @@ export default function PayrollPage() {
         <div className="card">
           <h3 className="font-semibold text-gray-900 mb-4">Add Staff Member</h3>
           <form onSubmit={handleAddStaff} className="space-y-4">
+            {formError && (
+              <div className="bg-red-50 text-red-600 px-4 py-3 rounded-lg text-sm">{formError}</div>
+            )}
             <div className="grid grid-cols-3 gap-4">
               <div>
                 <label className="label">Full Name</label>
@@ -86,6 +100,9 @@ export default function PayrollPage() {
         <div className="card">
           <h3 className="font-semibold text-gray-900 mb-4">Generate Payroll</h3>
           <form onSubmit={handleGenerate} className="space-y-4">
+            {formError && (
+              <div className="bg-red-50 text-red-600 px-4 py-3 rounded-lg text-sm">{formError}</div>
+            )}
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="label">Period Start</label>

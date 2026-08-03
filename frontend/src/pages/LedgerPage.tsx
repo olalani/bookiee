@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Download, Search } from 'lucide-react';
+import { Download, Search, Plus } from 'lucide-react';
 import { api } from '../lib/api';
 import { formatCurrency, formatDate, getSourceIcon, getStatusColor } from '../lib/utils';
 
@@ -8,6 +8,16 @@ export default function LedgerPage() {
   const [transactions, setTransactions] = useState<any[]>([]);
   const [pagination, setPagination] = useState({ page: 1, totalPages: 1, total: 0 });
   const [loading, setLoading] = useState(true);
+  const [showCreate, setShowCreate] = useState(false);
+  const [formError, setFormError] = useState('');
+  const [form, setForm] = useState({
+    sourceType: 'manual',
+    direction: 'out',
+    amount: 0,
+    counterpartyName: '',
+    counterpartyPhone: '',
+    categoryId: '',
+  });
   const [filters, setFilters] = useState({
     startDate: '',
     endDate: '',
@@ -39,6 +49,19 @@ export default function LedgerPage() {
     api.getCategories().then(setCategories);
     loadTransactions();
   }, []);
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFormError('');
+    try {
+      await api.createTransaction(form);
+      setShowCreate(false);
+      setForm({ sourceType: 'manual', direction: 'out', amount: 0, counterpartyName: '', counterpartyPhone: '', categoryId: '' });
+      loadTransactions();
+    } catch (err: any) {
+      setFormError(err.message || 'Failed to create transaction');
+    }
+  };
 
   const handleExport = async () => {
     const data = await api.exportTransactions(filters);
@@ -73,10 +96,58 @@ export default function LedgerPage() {
           <h1 className="text-2xl font-bold text-gray-900">Ledger</h1>
           <p className="text-gray-500 mt-1">{pagination.total} transactions</p>
         </div>
-        <button onClick={handleExport} className="btn-secondary flex items-center gap-2">
-          <Download className="w-4 h-4" /> Export CSV
-        </button>
+        <div className="flex gap-3">
+          <button onClick={() => setShowCreate(true)} className="btn-primary flex items-center gap-2">
+            <Plus className="w-4 h-4" /> New Transaction
+          </button>
+          <button onClick={handleExport} className="btn-secondary flex items-center gap-2">
+            <Download className="w-4 h-4" /> Export CSV
+          </button>
+        </div>
       </div>
+
+      {showCreate && (
+        <div className="card">
+          <h3 className="font-semibold text-gray-900 mb-4">New Transaction</h3>
+          <form onSubmit={handleCreate} className="space-y-4">
+            {formError && (
+              <div className="bg-red-50 text-red-600 px-4 py-3 rounded-lg text-sm">{formError}</div>
+            )}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="label">Direction</label>
+                <select value={form.direction} onChange={(e) => setForm({ ...form, direction: e.target.value })} className="input">
+                  <option value="out">Expense (out)</option>
+                  <option value="in">Income (in)</option>
+                </select>
+              </div>
+              <div>
+                <label className="label">Amount (₦)</label>
+                <input type="number" value={form.amount || ''} onChange={(e) => setForm({ ...form, amount: Number(e.target.value) })} className="input" required min="1" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="label">To/From</label>
+                <input type="text" value={form.counterpartyName} onChange={(e) => setForm({ ...form, counterpartyName: e.target.value })} className="input" placeholder="e.g. Shoprite" />
+              </div>
+              <div>
+                <label className="label">Category</label>
+                <select value={form.categoryId} onChange={(e) => setForm({ ...form, categoryId: e.target.value })} className="input">
+                  <option value="">Select category</option>
+                  {categories.map((c: any) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <button type="submit" className="btn-primary">Create Transaction</button>
+              <button type="button" onClick={() => setShowCreate(false)} className="btn-secondary">Cancel</button>
+            </div>
+          </form>
+        </div>
+      )}
 
       <div className="card">
         <div className="flex flex-wrap gap-3 items-end">

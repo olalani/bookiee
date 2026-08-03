@@ -14,6 +14,7 @@ export default function InvoicesPage() {
     dueDate: '',
     lineItems: [{ description: '', quantity: 1, unitPrice: 0 }],
   });
+  const [formError, setFormError] = useState('');
 
   useEffect(() => {
     api.getInvoices().then((r) => setInvoices(r.data)).finally(() => setLoading(false));
@@ -21,10 +22,15 @@ export default function InvoicesPage() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    await api.createInvoice(form);
-    setShowCreate(false);
-    setForm({ clientName: '', clientContact: '', dueDate: '', lineItems: [{ description: '', quantity: 1, unitPrice: 0 }] });
-    api.getInvoices().then((r) => setInvoices(r.data));
+    setFormError('');
+    try {
+      await api.createInvoice(form);
+      setShowCreate(false);
+      setForm({ clientName: '', clientContact: '', dueDate: '', lineItems: [{ description: '', quantity: 1, unitPrice: 0 }] });
+      api.getInvoices().then((r) => setInvoices(r.data));
+    } catch (err: any) {
+      setFormError(err.message || 'Failed to create invoice');
+    }
   };
 
   const addLineItem = () => {
@@ -47,6 +53,9 @@ export default function InvoicesPage() {
         <div className="card">
           <h3 className="font-semibold text-gray-900 mb-4">Create Invoice</h3>
           <form onSubmit={handleCreate} className="space-y-4">
+            {formError && (
+              <div className="bg-red-50 text-red-600 px-4 py-3 rounded-lg text-sm">{formError}</div>
+            )}
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="label">Client Name</label>
